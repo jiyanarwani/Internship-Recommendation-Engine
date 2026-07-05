@@ -4,7 +4,7 @@ An intelligent match-making portal built under the guidelines of the **Prime Min
 
 ---
 
-## 📊 Project Workflow
+## Project Workflow
 
 Below is the visual architecture detailing the resume processing pipeline and recommendation scoring engine:
 
