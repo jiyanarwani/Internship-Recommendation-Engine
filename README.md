@@ -62,7 +62,7 @@ graph TD
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 * **Backend**: Python, Flask, Flask-SQLAlchemy (SQLite)
 * **Frontend**: HTML5, Vanilla CSS3 (Slate-Ocean Premium Theme), JavaScript (SPA architecture)
@@ -71,52 +71,3 @@ graph TD
 
 ---
 
-## 📦 Installation & Setup
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/jiyanarwani/Internship-Recommendation-Engine.git
-cd Internship-Recommendation-Engine
-```
-
-### 2. Install Dependencies
-Ensure you have Python 3.10+ installed. Install the required libraries:
-```bash
-pip install flask flask_sqlalchemy scikit-learn numpy pdfplumber pypdf google-genai python-dotenv
-```
-*(Note: If you run into DLL issues with PyMuPDF on locked Windows environments, the parser will automatically bypass it and fall back to pdfplumber.)*
-
-### 3. Set Up Environment Variables (Optional)
-To use the Gemini AI parser, create a `.env` file in the root folder or set the environment variable:
-```env
-GEMINI_API_KEY=your_google_gemini_api_key_here
-```
-
-### 4. Initialize and Seed the Database
-Initialize tables and populate default internships, admin logins, and mock students:
-```bash
-python seed.py
-```
-
-### 5. Run the Application
-Start the Flask local development server:
-```bash
-python app.py
-```
-Open **`http://127.0.0.1:5000`** in your browser to view the application.
-
----
-
-## 👥 Seed Credentials (Default)
-
-* **Candidate Login**:
-  * Email: `student@pm-internship.gov.in`
-  * Password: `student123`
-* **Administrator Login**:
-  * Email: `admin@pm-internship.gov.in`
-  * Password: `admin123`
-
----
-
-## 🔒 License
-This project is open-source and licensed under the MIT License.
