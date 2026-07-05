@@ -67,7 +67,7 @@ Below is the visual architecture detailing the resume processing pipeline and re
 ## Tech Stack
 
 * **Backend**: Python, Flask, Flask-SQLAlchemy (SQLite)
-* **Frontend**: HTML5, Vanilla CSS3 (Slate-Ocean Premium Theme), JavaScript (SPA architecture)
+* **Frontend**: HTML5, Vanilla CSS3, JavaScript (SPA architecture)
 * **AI / ML**: Google Gemini API (`google-genai`), Scikit-Learn (`TfidfVectorizer`), NumPy
 * **PDF Extraction**: `pdfplumber`, `pypdf`, `pymupdf`
 
