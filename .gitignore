@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Databases
+internships.db
+
+# User Uploads
+uploads/*
+!uploads/user_3_resume.pdf
+
+# Environment files
+.env
+.env.*
+
+# Editor / IDE settings
+.vscode/
+.idea/
+.DS_Store
