@@ -4,6 +4,41 @@ An intelligent match-making portal built under the guidelines of the **Prime Min
 
 ---
 
+## 📊 Project Workflow
+
+Below is the visual architecture detailing the resume processing pipeline and recommendation scoring engine:
+
+```mermaid
+graph TD
+    subgraph "1. Resume Parsing & Autofill Pipeline"
+        A[Upload PDF Resume] --> B{Text Extractor}
+        B -->|pdfplumber / fitz / pypdf| C[Raw Resume Text]
+        C --> D{Gemini API Key Set?}
+        D -->|Yes| E[Gemini AI Parser]
+        D -->|No| F[Local Heuristic Parser]
+        E --> G[Structured JSON]
+        F --> G
+        G --> H[Skill Normalization & Deduplication]
+        H --> I[Autofill Preview Modal]
+        I -->|User Approves Fields| J[Form Inputs Updated]
+        J -->|Save Profile| K[Commit to SQLite Database]
+    end
+
+    subgraph "2. Recommendation Match Scoring Engine"
+        L[Candidate Profile] --> P{Match Engine}
+        M[Internships DB] --> P
+        P -->|TF-IDF Vectorization| N[Semantic Cosine Similarity 20%]
+        P -->|Skills Overlap| O[Skills Match Score 40%]
+        P -->|Eligibility Criteria| Q[Structured Match Score 40%]
+        N --> R[Weighted Hybrid Match Score]
+        O --> R
+        Q --> R
+        R --> S[Generate Score Breakdown & Explanation]
+    end
+```
+
+---
+
 ## 🚀 Key Features
 
 ### 1. AI-First Resume Parser
