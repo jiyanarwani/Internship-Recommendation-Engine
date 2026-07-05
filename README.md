@@ -8,33 +8,35 @@ An intelligent match-making portal built under the guidelines of the **Prime Min
 
 Below is the visual architecture detailing the resume processing pipeline and recommendation scoring engine:
 
-```mermaid
-graph TD
-    subgraph "1. Resume Parsing & Autofill Pipeline"
-        A[Upload PDF Resume] --> B{Text Extractor}
-        B -->|pdfplumber / fitz / pypdf| C[Raw Resume Text]
-        C --> D{Gemini API Key Set?}
-        D -->|Yes| E[Gemini AI Parser]
-        D -->|No| F[Local Heuristic Parser]
-        E --> G[Structured JSON]
-        F --> G
-        G --> H[Skill Normalization & Deduplication]
-        H --> I[Autofill Preview Modal]
-        I -->|User Approves Fields| J[Form Inputs Updated]
-        J -->|Save Profile| K[Commit to SQLite Database]
-    end
-
-    subgraph "2. Recommendation Match Scoring Engine"
-        L[Candidate Profile] --> P{Match Engine}
-        M[Internships DB] --> P
-        P -->|TF-IDF Vectorization| N[Semantic Cosine Similarity 20%]
-        P -->|Skills Overlap| O[Skills Match Score 40%]
-        P -->|Eligibility Criteria| Q[Structured Match Score 40%]
-        N --> R[Weighted Hybrid Match Score]
-        O --> R
-        Q --> R
-        R --> S[Generate Score Breakdown & Explanation]
-    end
+```text
+[ PDF Resume Upload ]
+         │
+         ▼
+[ Multi-Stage Text Extraction ]
+  (pdfplumber ➔ PyMuPDF ➔ pypdf)
+         │
+         ▼
+[ Parser Decision Layer ]
+  ├── (Gemini API Available)  ➔  [ Gemini AI Structured JSON Parser ]
+  └── (No Gemini API Key)    ➔  [ Improved Local Heuristic Parser ]
+         │
+         ▼
+[ Post-Processing & Deduplication ]
+  (Skill Normalization & Project De-duping)
+         │
+         ▼
+[ Frontend Comparison Preview Modal ]
+  (Side-by-Side Review ➔ Selective Form Prefilling)
+         │
+         ▼
+[ Hybrid Recommendation Engine ]
+  ├── Skills Match (40% Weight)
+  ├── Structured Eligibility (40% Weight)
+  └── Semantic Cosine Similarity (20% Weight)
+         │
+         ▼
+[ Explanatory Match Analysis ]
+  (Dynamic Match Score Breakdown & Learning Roadmap)
 ```
 
 ---
