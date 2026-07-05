@@ -41,7 +41,7 @@ Below is the visual architecture detailing the resume processing pipeline and re
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 ### 1. AI-First Resume Parser
 * **Multi-stage Extraction**: Parses PDF resumes using a robust pipeline of `pdfplumber`, `PyMuPDF`, and `pypdf`.
