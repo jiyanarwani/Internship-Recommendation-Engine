@@ -26,6 +26,14 @@ def create_app():
     # Create tables
     with app.app_context():
         db.create_all()
+        from models import Internship
+        if Internship.query.first() is None:
+            print("Database is empty. Auto-seeding default opportunities...")
+            try:
+                from seed import perform_seed
+                perform_seed()
+            except Exception as e:
+                print(f"Failed to auto-seed database: {e}")
         
     return app
 
