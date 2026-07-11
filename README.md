@@ -73,3 +73,16 @@ Below is the visual architecture detailing the resume processing pipeline and re
 
 ---
 
+## Database Setup & Initialization
+
+The application uses SQLite for persistent storage, with database initialization and seeding integrated seamlessly:
+
+* **Auto-Seeding**: When the Flask application starts up, it checks if the internship database has been populated. If empty, it automatically seeds:
+  - **1 Admin User**: `admin@pm-internship.gov.in` (password: `admin123`)
+  - **1 Default Candidate User**: `student@pm-internship.gov.in` (password: `student123`), preloaded with a completed profile for student *Aarav Sharma*.
+  - **10 Curated Internship Opportunities** across diverse domains (Software Engineering, Web Development, Cloud Computing, ML, Operations, etc.) corresponding to the PM Scheme.
+* **Manual Reset & Seeding**: You can reset and re-seed the database at any time by running:
+  ```bash
+  python seed.py
+  ```
+  *(Note: Running this command directly is destructive and will drop all tables before seeding a clean database)*
