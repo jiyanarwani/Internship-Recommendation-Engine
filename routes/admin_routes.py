@@ -1,24 +1,19 @@
-from flask import Blueprint, request, jsonify, session
-from models import db, User, Profile, Internship, SavedInternship, RecommendationHistory, ApplicationHistory
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlmodel import Session, select
+from database import get_session
+from models import User, Profile, Internship, SavedInternship, RecommendationHistory, ApplicationHistory
+from dependencies import get_current_admin
+from schemas import InternshipCreateRequest
 from sqlalchemy import func
 
-admin_bp = Blueprint('admin', __name__)
+admin_router = APIRouter()
 
-# Helper to verify admin login
-def is_admin():
-    user_id = session.get('user_id')
-    role = session.get('role')
-    if not user_id or role != 'admin':
-        return False
-    user = User.query.get(user_id)
-    return user is not None and user.role == 'admin'
-
-@admin_bp.route('/users', methods=['GET'])
-def get_users():
-    if not is_admin():
-        return jsonify({"error": "Unauthorized"}), 403
-        
-    users = User.query.filter_by(role='candidate').all()
+@admin_router.get('/users')
+def get_users(
+    current_admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session)
+):
+    users = session.exec(select(User).where(User.role == 'candidate')).all()
     serialized = []
     for u in users:
         p = u.profile
@@ -32,126 +27,147 @@ def get_users():
             "cgpa": p.cgpa if p else 0.0,
             "created_at": u.created_at.strftime("%Y-%m-%d")
         })
-    return jsonify(serialized), 200
+    return serialized
 
-@admin_bp.route('/internships', methods=['POST'])
-def add_internship():
-    if not is_admin():
-        return jsonify({"error": "Unauthorized"}), 403
-        
-    data = request.get_json() or {}
-    
+@admin_router.post('/internships')
+def add_internship(
+    payload: InternshipCreateRequest,
+    current_admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session)
+):
     try:
         inst = Internship(
-            company_name=data.get('company_name', '').strip(),
-            company_logo=data.get('company_logo', '').strip() or "https://via.placeholder.com/60",
-            title=data.get('title', '').strip(),
-            description=data.get('description', '').strip(),
-            responsibilities=data.get('responsibilities', '').strip(),
-            required_skills=data.get('required_skills', []),
-            eligibility_criteria=data.get('eligibility_criteria', '').strip(),
-            degree_requirement=data.get('degree_requirement', '').strip(),
-            branch_requirement=data.get('branch_requirement', []),
-            location=data.get('location', '').strip(),
-            mode=data.get('mode', 'Onsite').strip(),
-            duration=int(data.get('duration', 6)),
-            stipend=int(data.get('stipend', 0)),
-            industry=data.get('industry', '').strip(),
-            category=data.get('category', '').strip(),
-            application_deadline=data.get('application_deadline', '').strip()
+            company_name=payload.company_name.strip(),
+            company_logo=payload.company_logo.strip() if payload.company_logo else "https://via.placeholder.com/60",
+            title=payload.title.strip(),
+            description=payload.description.strip(),
+            responsibilities=payload.responsibilities.strip() if payload.responsibilities else "",
+            required_skills=payload.required_skills if payload.required_skills else [],
+            eligibility_criteria=payload.eligibility_criteria.strip() if payload.eligibility_criteria else "",
+            degree_requirement=payload.degree_requirement.strip() if payload.degree_requirement else "Any",
+            branch_requirement=payload.branch_requirement if payload.branch_requirement else [],
+            location=payload.location.strip(),
+            mode=payload.mode.strip(),
+            duration=payload.duration,
+            stipend=payload.stipend,
+            industry=payload.industry.strip() if payload.industry else "",
+            category=payload.category.strip() if payload.category else "",
+            application_deadline=payload.application_deadline.strip() if payload.application_deadline else ""
         )
-        db.session.add(inst)
-        db.session.commit()
-        return jsonify({"message": "Internship added successfully", "id": inst.id}), 201
+        session.add(inst)
+        session.commit()
+        session.refresh(inst)
+        return {"message": "Internship added successfully", "id": inst.id}
     except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": f"Failed to add internship: {str(e)}"}), 500
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to add internship: {str(e)}")
 
-@admin_bp.route('/internships/<int:id>', methods=['PUT', 'DELETE'])
-def manage_internship(id):
-    if not is_admin():
-        return jsonify({"error": "Unauthorized"}), 403
-        
-    inst = Internship.query.get_or_404(id)
-    
-    if request.method == 'PUT':
-        data = request.get_json() or {}
-        try:
-            inst.company_name = data.get('company_name', inst.company_name).strip()
-            inst.company_logo = data.get('company_logo', inst.company_logo).strip()
-            inst.title = data.get('title', inst.title).strip()
-            inst.description = data.get('description', inst.description).strip()
-            inst.responsibilities = data.get('responsibilities', inst.responsibilities).strip()
-            inst.required_skills = data.get('required_skills', inst.required_skills)
-            inst.eligibility_criteria = data.get('eligibility_criteria', inst.eligibility_criteria).strip()
-            inst.degree_requirement = data.get('degree_requirement', inst.degree_requirement).strip()
-            inst.branch_requirement = data.get('branch_requirement', inst.branch_requirement)
-            inst.location = data.get('location', inst.location).strip()
-            inst.mode = data.get('mode', inst.mode).strip()
-            inst.duration = int(data.get('duration', inst.duration))
-            inst.stipend = int(data.get('stipend', inst.stipend))
-            inst.industry = data.get('industry', inst.industry).strip()
-            inst.category = data.get('category', inst.category).strip()
-            inst.application_deadline = data.get('application_deadline', inst.application_deadline).strip()
-            
-            db.session.commit()
-            return jsonify({"message": "Internship updated successfully"}), 200
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": f"Failed to update: {str(e)}"}), 500
-            
-    elif request.method == 'DELETE':
-        try:
-            db.session.delete(inst)
-            db.session.commit()
-            return jsonify({"message": "Internship deleted successfully"}), 200
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": f"Failed to delete: {str(e)}"}), 500
-
-@admin_bp.route('/stats', methods=['GET'])
-def get_stats():
-    if not is_admin():
-        return jsonify({"error": "Unauthorized"}), 403
+@admin_router.put('/internships/{internship_id}')
+def update_internship(
+    internship_id: int,
+    payload: InternshipCreateRequest,
+    current_admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session)
+):
+    inst = session.get(Internship, internship_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Internship not found")
         
     try:
-        total_users = User.query.filter_by(role='candidate').count()
-        total_internships = Internship.query.count()
+        inst.company_name = payload.company_name.strip()
+        if payload.company_logo is not None:
+            inst.company_logo = payload.company_logo.strip()
+        inst.title = payload.title.strip()
+        inst.description = payload.description.strip()
+        if payload.responsibilities is not None:
+            inst.responsibilities = payload.responsibilities.strip()
+        if payload.required_skills is not None:
+            inst.required_skills = payload.required_skills
+        if payload.eligibility_criteria is not None:
+            inst.eligibility_criteria = payload.eligibility_criteria.strip()
+        if payload.degree_requirement is not None:
+            inst.degree_requirement = payload.degree_requirement.strip()
+        if payload.branch_requirement is not None:
+            inst.branch_requirement = payload.branch_requirement
+        inst.location = payload.location.strip()
+        inst.mode = payload.mode.strip()
+        inst.duration = payload.duration
+        inst.stipend = payload.stipend
+        if payload.industry is not None:
+            inst.industry = payload.industry.strip()
+        if payload.category is not None:
+            inst.category = payload.category.strip()
+        if payload.application_deadline is not None:
+            inst.application_deadline = payload.application_deadline.strip()
+            
+        session.add(inst)
+        session.commit()
+        return {"message": "Internship updated successfully"}
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update: {str(e)}")
+
+@admin_router.delete('/internships/{internship_id}')
+def delete_internship(
+    internship_id: int,
+    current_admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session)
+):
+    inst = session.get(Internship, internship_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Internship not found")
         
-        # Average recommendation score
-        avg_score_query = db.session.query(func.avg(RecommendationHistory.score)).scalar()
+    try:
+        session.delete(inst)
+        session.commit()
+        return {"message": "Internship deleted successfully"}
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete: {str(e)}")
+
+@admin_router.get('/stats')
+def get_stats(
+    current_admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session)
+):
+    try:
+        total_users = session.exec(select(func.count(User.id)).where(User.role == 'candidate')).one()
+        total_internships = session.exec(select(func.count(Internship.id))).one()
+        
+        avg_score_query = session.exec(select(func.avg(RecommendationHistory.score))).one()
         avg_score = round(float(avg_score_query), 1) if avg_score_query else 0.0
         
-        # Mode distribution (Remote, Hybrid, Onsite)
-        modes = db.session.query(Internship.mode, func.count(Internship.id)).group_by(Internship.mode).all()
+        modes = session.exec(select(Internship.mode, func.count(Internship.id)).group_by(Internship.mode)).all()
         mode_data = {m[0]: m[1] for m in modes}
         
-        # Popular locations (Top 5)
-        locations = db.session.query(Internship.location, func.count(Internship.id))\
-                              .group_by(Internship.location)\
-                              .order_by(func.count(Internship.id).desc())\
-                              .limit(5).all()
+        locations = session.exec(
+            select(Internship.location, func.count(Internship.id))
+            .group_by(Internship.location)
+            .order_by(func.count(Internship.id).desc())
+            .limit(5)
+        ).all()
         loc_data = {l[0]: l[1] for l in locations}
         
-        # Popular companies (Top 5)
-        companies = db.session.query(Internship.company_name, func.count(Internship.id))\
-                              .group_by(Internship.company_name)\
-                              .order_by(func.count(Internship.id).desc())\
-                              .limit(5).all()
+        companies = session.exec(
+            select(Internship.company_name, func.count(Internship.id))
+            .group_by(Internship.company_name)
+            .order_by(func.count(Internship.id).desc())
+            .limit(5)
+        ).all()
         company_data = {c[0]: c[1] for c in companies}
         
-        # Most applied internships (Top 5)
-        applied_internships = db.session.query(Internship.company_name, Internship.title, func.count(ApplicationHistory.id))\
-                                        .join(ApplicationHistory, ApplicationHistory.internship_id == Internship.id)\
-                                        .group_by(Internship.id)\
-                                        .order_by(func.count(ApplicationHistory.id).desc())\
-                                        .limit(5).all()
+        applied_internships = session.exec(
+            select(Internship.company_name, Internship.title, func.count(ApplicationHistory.id))
+            .join(ApplicationHistory, ApplicationHistory.internship_id == Internship.id)
+            .group_by(Internship.id)
+            .order_by(func.count(ApplicationHistory.id).desc())
+            .limit(5)
+        ).all()
         applied_data = [
             {"label": f"{a[0]} - {a[1][:20]}...", "count": a[2]} for a in applied_internships
         ]
         
-        # Most searched/requested skills (aggregating candidate skills)
-        profiles = Profile.query.all()
+        profiles = session.exec(select(Profile)).all()
         skill_counts = {}
         for p in profiles:
             for skill in p.skills:
@@ -160,7 +176,7 @@ def get_stats():
         sorted_skills = sorted(skill_counts.items(), key=lambda x: x[1], reverse=True)[:6]
         skills_data = [{"skill": s[0], "count": s[1]} for s in sorted_skills]
         
-        return jsonify({
+        return {
             "total_users": total_users,
             "total_internships": total_internships,
             "average_match_score": avg_score,
@@ -169,6 +185,6 @@ def get_stats():
             "popular_companies": company_data,
             "most_applied_internships": applied_data,
             "most_searched_skills": skills_data
-        }), 200
+        }
     except Exception as e:
-        return jsonify({"error": f"Failed to retrieve analytics: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve analytics: {str(e)}")

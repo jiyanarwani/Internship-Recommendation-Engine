@@ -1,28 +1,33 @@
-from models import db, User, Profile, Internship
+from sqlmodel import SQLModel, Session
+from database import engine
+from models import User, Profile, Internship
 from datetime import datetime
 
 def seed_database():
-    from app import create_app
-    app = create_app()
-    with app.app_context():
-        # Drop all and recreate tables
-        db.drop_all()
-        db.create_all()
-        perform_seed()
+    print("Dropping tables...")
+    SQLModel.metadata.drop_all(engine)
+    print("Creating tables...")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        try:
+            perform_seed(session)
+        except Exception as e:
+            session.rollback()
+            print(f"Seeding failed: {e}")
 
-def perform_seed():
+def perform_seed(session):
     print("Database tables initialized. Seeding records...")
     
     # 1. Create Admin User
     admin = User(email="admin@pm-internship.gov.in", role="admin")
     admin.set_password("admin123")
-    db.session.add(admin)
+    session.add(admin)
     
     # 2. Create Student User
     student = User(email="student@pm-internship.gov.in", role="candidate")
     student.set_password("student123")
-    db.session.add(student)
-    db.session.commit()  # commit to get student.id
+    session.add(student)
+    session.commit()  # commit to get student.id
     
     # Create Student Profile
     student_profile = Profile(
@@ -40,7 +45,7 @@ def perform_seed():
         preferred_job_role="Software Developer",
         preferred_location="Mumbai"
     )
-    db.session.add(student_profile)
+    session.add(student_profile)
     
     # 3. Seed Internships
     internships_data = [
@@ -245,10 +250,10 @@ def perform_seed():
             category=item["category"],
             application_deadline=item["application_deadline"]
         )
-        db.session.add(inst)
+        session.add(inst)
         
-        db.session.commit()
-        print("Database successfully seeded with default users and 10 internships.")
+    session.commit()
+    print("Database successfully seeded with default users and 10 internships.")
 
 if __name__ == "__main__":
     seed_database()

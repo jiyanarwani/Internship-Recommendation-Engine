@@ -2,7 +2,8 @@ import re
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from models import Internship, Profile, db
+from sqlmodel import Session, select
+from models import Internship, Profile
 
 def clean_text(text):
     """Normalize text for ML preprocessing."""
@@ -31,12 +32,153 @@ def extract_min_cgpa(eligibility_text):
                 continue
     return 0.0
 
-def get_recommendations(profile):
+# Fuzzy Branch Match Configurations
+BRANCH_GROUPS = {
+    "COMPUTER": {
+        "computer science",
+        "computer engineering",
+        "computer science engineering",
+        "computer science and engineering",
+        "cse",
+        "ce",
+        "cs",
+        "computer",
+        "software"
+    },
+    "IT": {
+        "information technology",
+        "it",
+        "information science",
+        "information science and engineering"
+    },
+    "ELECTRONICS": {
+        "electronics",
+        "electronics engineering",
+        "electronics and telecommunication",
+        "electronics and communication",
+        "ece",
+        "extc"
+    },
+    "ELECTRICAL": {
+        "electrical",
+        "electrical engineering",
+        "electrical and electronics",
+        "eee"
+    },
+    "MECHANICAL": {
+        "mechanical",
+        "mechanical engineering",
+        "automobile",
+        "production"
+    },
+    "CIVIL": {
+        "civil",
+        "civil engineering"
+    },
+    "CHEMICAL": {
+        "chemical",
+        "chemical engineering"
+    },
+    "BUSINESS": {
+        "business",
+        "finance",
+        "commerce",
+        "mba",
+        "bba",
+        "management"
+    }
+}
+
+BRANCH_SIMILARITY_MATRIX = {
+    'COMPUTER': {
+        'COMPUTER': 1.0,
+        'IT': 0.95,
+        'ELECTRONICS': 0.75,
+        'ELECTRICAL': 0.50,
+    },
+    'IT': {
+        'COMPUTER': 0.95,
+        'IT': 1.0,
+        'ELECTRONICS': 0.70,
+        'ELECTRICAL': 0.45,
+    },
+    'ELECTRONICS': {
+        'COMPUTER': 0.75,
+        'IT': 0.70,
+        'ELECTRONICS': 1.0,
+        'ELECTRICAL': 0.85,
+    },
+    'ELECTRICAL': {
+        'COMPUTER': 0.50,
+        'IT': 0.45,
+        'ELECTRONICS': 0.85,
+        'ELECTRICAL': 1.0,
+    },
+    'MECHANICAL': {
+        'MECHANICAL': 1.0,
+        'CIVIL': 0.25,
+        'CHEMICAL': 0.20,
+    },
+    'CIVIL': {
+        'MECHANICAL': 0.25,
+        'CIVIL': 1.0,
+        'CHEMICAL': 0.15,
+    },
+    'CHEMICAL': {
+        'MECHANICAL': 0.20,
+        'CIVIL': 0.15,
+        'CHEMICAL': 1.0,
+    },
+}
+
+def normalize_branch(name: str) -> str:
+    if not name:
+        return ""
+    name_lower = name.lower().strip()
+    # Remove degree prefixes to allow clean keyword matching
+    name_clean = re.sub(r'\bb\.?\s*tech(nology)?\b', '', name_lower)
+    name_clean = re.sub(r'\bb\.?\s*e\.?\b', '', name_clean)
+    name_clean = re.sub(r'\bbachelor\s+of\s+(technology|engineering)\b', '', name_clean)
+    name_clean = re.sub(r'[^a-z0-9\s\&]', ' ', name_clean)
+    name_clean = re.sub(r'\s+', ' ', name_clean).strip()
+    
+    if not name_clean:
+        name_clean = re.sub(r'[^a-z0-9\s\&]', ' ', name_lower)
+        name_clean = re.sub(r'\s+', ' ', name_clean).strip()
+    return name_clean
+
+def get_branch_group(name: str) -> str:
+    norm_name = normalize_branch(name)
+    if not norm_name:
+        return "OTHER"
+    
+    for group, keywords in BRANCH_GROUPS.items():
+        for kw in keywords:
+            if len(kw) <= 4:
+                # Word boundary for short codes like cs, it, ce, me, eee
+                pattern = rf"\b{re.escape(kw)}\b"
+                if re.search(pattern, norm_name):
+                    return group
+            else:
+                if kw in norm_name:
+                    return group
+    return "OTHER"
+
+def get_branch_similarity(group1: str, group2: str) -> float:
+    if group1 == group2:
+        return 1.0
+    if group1 in BRANCH_SIMILARITY_MATRIX and group2 in BRANCH_SIMILARITY_MATRIX[group1]:
+        return BRANCH_SIMILARITY_MATRIX[group1][group2]
+    if group2 in BRANCH_SIMILARITY_MATRIX and group1 in BRANCH_SIMILARITY_MATRIX[group2]:
+        return BRANCH_SIMILARITY_MATRIX[group2][group1]
+    return 0.0
+
+def get_recommendations(profile, session: Session):
     """
     Run hybrid ML recommendation system.
     Returns: list of dicts containing internship object, match score, reasons, and missing skills.
     """
-    internships = Internship.query.all()
+    internships = session.exec(select(Internship)).all()
     if not internships:
         return []
 
@@ -80,12 +222,16 @@ def get_recommendations(profile):
         
         # 3. Structured Matches
         # Branch match
-        branch_req = [b.lower().strip() for b in inst.branch_requirement]
         branch_match = 1.0
-        if branch_req and profile.branch:
-            user_branch = profile.branch.lower().strip()
-            # Direct or partial match
-            branch_match = 1.0 if any(br in user_branch or user_branch in br for br in branch_req) else 0.0
+        if inst.branch_requirement and profile.branch:
+            user_branch_group = get_branch_group(profile.branch)
+            max_sim = 0.0
+            for req in inst.branch_requirement:
+                req_group = get_branch_group(req)
+                sim = get_branch_similarity(user_branch_group, req_group)
+                if sim > max_sim:
+                    max_sim = sim
+            branch_match = max_sim
             
         # Degree match
         degree_match = 1.0
@@ -144,8 +290,8 @@ def get_recommendations(profile):
         # so we scale it to fit [0.0, 1.0] dynamically
         scaled_semantic_score = min(1.0, semantic_score / 0.25)
 
-        # 4. Hybrid Formulation: 40% Skills, 40% Other matches, 20% Semantic Similarity
-        final_score = (0.40 * skills_match_score) + (0.40 * structured_score) + (0.20 * scaled_semantic_score)
+        # 4. Hybrid Formulation: 60% Skills, 25% Other matches, 15% Semantic Similarity
+        final_score = (0.60 * skills_match_score) + (0.25 * structured_score) + (0.15 * scaled_semantic_score)
         
         # Scale to 0-100%
         match_percentage = round(final_score * 100)
@@ -179,20 +325,36 @@ def get_recommendations(profile):
         for mi in matched_interests[:2]:
             reasons.append(f"Your interest in {mi} aligns with this opportunity.")
 
-        # Structured reasons
+        # Structured reasons (Matches & Mismatches/Gaps)
         if branch_match == 1.0 and inst.branch_requirement:
             reasons.append("Your academic branch matches the eligibility profile.")
+        elif branch_match > 0.0 and inst.branch_requirement:
+            reasons.append(f"Branch overlap: Your branch ({profile.branch}) is closely related to required fields (similarity: {round(branch_match * 100)}%).")
+        elif inst.branch_requirement:
+            reasons.append(f"Branch mismatch: Required branch list is {', '.join(inst.branch_requirement)}, but your branch is {profile.branch or 'not specified'}.")
+
         if degree_match == 1.0 and inst.degree_requirement and inst.degree_requirement.lower() != 'any':
             reasons.append(f"Your {profile.degree} degree satisfies eligibility criteria.")
+        elif degree_match < 1.0 and inst.degree_requirement:
+            reasons.append(f"Degree gap: Required degree is {inst.degree_requirement}, but your degree is {profile.degree or 'not specified'}.")
+
         if location_match == 1.0:
             if inst.mode.lower() == 'remote':
                 reasons.append("This is a remote position, fitting flexible location preferences.")
             else:
                 reasons.append(f"Located in {inst.location}, matching your preferred location.")
+        elif location_match < 1.0 and inst.location:
+            reasons.append(f"Location mismatch: Job is in {inst.location} ({inst.mode}), but your preferred location is {profile.preferred_location or 'not specified'}.")
+
         if industry_match == 1.0:
             reasons.append(f"Fits your preferred {profile.preferred_industry} industry segment.")
+        elif industry_match < 1.0 and inst.category:
+            reasons.append(f"Industry mismatch: Job sector is {inst.category}, but your preferred industry is {profile.preferred_industry or 'not specified'}.")
+
         if cgpa_match == 1.0 and min_cgpa > 0.0:
             reasons.append("Your CGPA meets the academic requirements.")
+        elif cgpa_match < 1.0 and min_cgpa > 0.0:
+            reasons.append(f"CGPA gap: Required minimum CGPA is {min_cgpa}, but your CGPA is {profile.cgpa or 'not specified'}.")
 
         # Default reason if too short
         if not reasons:

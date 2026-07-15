@@ -1,31 +1,35 @@
-from flask import Blueprint, request, jsonify, session
-from models import db, User, Profile
+from fastapi import APIRouter, Request, HTTPException, Depends
+from sqlmodel import Session, select
+from database import get_session
+from models import User, Profile
+from schemas import RegisterRequest, LoginRequest
 
-auth_bp = Blueprint('auth', __name__)
+auth_router = APIRouter()
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
-    data = request.get_json() or {}
-    email = data.get('email', '').strip().lower()
-    password = data.get('password', '')
-    role = data.get('role', 'candidate').strip().lower()  # 'candidate' or 'admin'
+@auth_router.post('/register')
+def register(payload: RegisterRequest, request: Request, session: Session = Depends(get_session)):
+    email = payload.email.strip().lower()
+    password = payload.password
+    role = payload.role.strip().lower()
     
     if not email or not password:
-        return jsonify({"error": "Email and password are required"}), 400
+        raise HTTPException(status_code=400, detail="Email and password are required")
         
     if role not in ['candidate', 'admin']:
         role = 'candidate'
         
     # Check if user already exists
-    existing_user = User.query.filter_by(email=email).first()
+    statement = select(User).where(User.email == email)
+    existing_user = session.exec(statement).first()
     if existing_user:
-        return jsonify({"error": "User with this email already exists"}), 400
+        raise HTTPException(status_code=400, detail="User with this email already exists")
         
     try:
         user = User(email=email, role=role)
         user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
+        session.add(user)
+        session.commit()
+        session.refresh(user)
         
         # Auto-create empty profile if they are a candidate
         if role == 'candidate':
@@ -35,42 +39,42 @@ def register():
                 skills=[],
                 interests=[]
             )
-            db.session.add(profile)
-            db.session.commit()
+            session.add(profile)
+            session.commit()
             
-        return jsonify({"message": "Registration successful. You can now login.", "user_id": user.id}), 201
+        return {"message": "Registration successful. You can now login.", "user_id": user.id}
     except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": f"Registration failed: {str(e)}"}), 500
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
 
-@auth_bp.route('/login', methods=['POST'])
-def login():
-    data = request.get_json() or {}
-    email = data.get('email', '').strip().lower()
-    password = data.get('password', '')
+@auth_router.post('/login')
+def login(payload: LoginRequest, request: Request, session: Session = Depends(get_session)):
+    email = payload.email.strip().lower()
+    password = payload.password
     
     if not email or not password:
-        return jsonify({"error": "Email and password are required"}), 400
+        raise HTTPException(status_code=400, detail="Email and password are required")
         
-    user = User.query.filter_by(email=email).first()
+    statement = select(User).where(User.email == email)
+    user = session.exec(statement).first()
     if not user or not user.check_password(password):
-        return jsonify({"error": "Invalid email or password"}), 401
+        raise HTTPException(status_code=401, detail="Invalid email or password")
         
     # Store session
-    session['user_id'] = user.id
-    session['role'] = user.role
+    request.session['user_id'] = user.id
+    request.session['role'] = user.role
+    request.session['logged_in'] = True
     
     # Check profile completion
     profile_completed = False
     full_name = "User"
     if user.role == 'candidate' and user.profile:
         full_name = user.profile.full_name
-        # Profile is considered filled if they have added education, degree, branch, and some skills
         p = user.profile
         if p.education_level and p.degree and p.branch and p.skills:
             profile_completed = True
 
-    return jsonify({
+    return {
         "message": "Login successful",
         "user": {
             "id": user.id,
@@ -79,23 +83,23 @@ def login():
             "name": full_name,
             "profile_completed": profile_completed
         }
-    }), 200
+    }
 
-@auth_bp.route('/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({"message": "Logged out successfully"}), 200
+@auth_router.post('/logout')
+def logout(request: Request):
+    request.session.clear()
+    return {"message": "Logged out successfully"}
 
-@auth_bp.route('/session', methods=['GET'])
-def check_session():
-    user_id = session.get('user_id')
+@auth_router.get('/session')
+def check_session(request: Request, session: Session = Depends(get_session)):
+    user_id = request.session.get('user_id')
     if not user_id:
-        return jsonify({"logged_in": False}), 200
+        return {"logged_in": False}
         
-    user = User.query.get(user_id)
+    user = session.get(User, user_id)
     if not user:
-        session.clear()
-        return jsonify({"logged_in": False}), 200
+        request.session.clear()
+        return {"logged_in": False}
         
     profile_completed = False
     full_name = "User"
@@ -105,7 +109,7 @@ def check_session():
         if p.education_level and p.degree and p.branch and p.skills:
             profile_completed = True
             
-    return jsonify({
+    return {
         "logged_in": True,
         "user": {
             "id": user.id,
@@ -114,4 +118,4 @@ def check_session():
             "name": full_name,
             "profile_completed": profile_completed
         }
-    }), 200
+    }

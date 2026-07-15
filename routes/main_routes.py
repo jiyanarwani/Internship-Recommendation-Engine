@@ -1,50 +1,55 @@
-from flask import Blueprint, render_template, request, jsonify, session
-from models import db, Internship, Profile, SavedInternship, RecommendationHistory
-from ml.recommender import get_recommendations, clean_text
 import re
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
+from sqlmodel import Session, select
+from database import get_session
+from models import Internship, Profile, SavedInternship
+from ml.recommender import get_recommendations
 
-main_bp = Blueprint('main', __name__)
+main_router = APIRouter()
 
-@main_bp.route('/')
+@main_router.get('/')
 def index():
-    return render_template('index.html')
+    return FileResponse('templates/index.html')
 
-@main_bp.route('/api/internships', methods=['GET'])
-def list_internships():
-    # Retrieve query parameters
-    query = request.args.get('q', '').strip().lower()
-    mode_filter = request.args.get('mode', '').strip()  # 'Remote', 'Hybrid', 'Onsite'
-    location_filter = request.args.get('location', '').strip()
-    industry_filter = request.args.get('industry', '').strip()
-    duration_filter = request.args.get('duration', '').strip()  # e.g., '3' or '6'
-    skills_filter = request.args.get('skills', '').strip()  # comma separated
-    company_filter = request.args.get('company', '').strip()
-    sort_by = request.args.get('sort', 'latest').strip().lower()  # 'latest', 'stipend', 'match'
-
+@main_router.get('/api/internships')
+def list_internships(
+    q: str = "",
+    mode: str = "",
+    location: str = "",
+    industry: str = "",
+    duration: str = "",
+    skills: str = "",
+    company: str = "",
+    sort: str = "latest",
+    request: Request = None,
+    session: Session = Depends(get_session)
+):
     # Start database query
-    query_obj = Internship.query
+    query_obj = select(Internship)
 
     # Base filters
-    if mode_filter:
-        query_obj = query_obj.filter(Internship.mode.ilike(mode_filter))
-    if location_filter:
-        query_obj = query_obj.filter(Internship.location.ilike(f"%{location_filter}%"))
-    if industry_filter:
-        query_obj = query_obj.filter(Internship.industry.ilike(f"%{industry_filter}%"))
-    if duration_filter:
+    if mode:
+        query_obj = query_obj.where(Internship.mode.ilike(mode))
+    if location:
+        query_obj = query_obj.where(Internship.location.ilike(f"%{location}%"))
+    if industry:
+        query_obj = query_obj.where(Internship.industry.ilike(f"%{industry}%"))
+    if duration:
         try:
-            val = int(duration_filter)
-            query_obj = query_obj.filter(Internship.duration <= val)
+            val = int(duration)
+            query_obj = query_obj.where(Internship.duration <= val)
         except ValueError:
             pass
-    if company_filter:
-        query_obj = query_obj.filter(Internship.company_name.ilike(f"%{company_filter}%"))
+    if company:
+        query_obj = query_obj.where(Internship.company_name.ilike(f"%{company}%"))
 
-    internships = query_obj.all()
+    internships = session.exec(query_obj).all()
 
     # Client-side filtering for skills
-    if skills_filter:
-        skills_to_match = [s.strip().lower() for s in skills_filter.split(',') if s.strip()]
+    if skills:
+        skills_to_match = [s.strip().lower() for s in skills.split(',') if s.strip()]
         filtered = []
         for inst in internships:
             inst_skills = [s.lower() for s in inst.required_skills]
@@ -53,8 +58,8 @@ def list_internships():
         internships = filtered
 
     # Intelligent Query Parsing (e.g. "Python Remote Mumbai")
-    if query:
-        terms = [t for t in re.split(r'\s+', query) if t]
+    if q:
+        terms = [t for t in re.split(r'\s+', q) if t]
         scored_internships = []
         for inst in internships:
             score = 0
@@ -82,15 +87,14 @@ def list_internships():
         internships = [x[0] for x in scored_internships]
 
     # Calculate match scores for recommendations sorting if user is logged in
-    user_id = session.get('user_id')
-    user_role = session.get('role')
+    user_id = request.session.get('user_id') if request else None
+    user_role = request.session.get('role') if request else None
     user_recs_map = {}
     
     if user_id and user_role == 'candidate':
-        profile = Profile.query.filter_by(user_id=user_id).first()
+        profile = session.exec(select(Profile).where(Profile.user_id == user_id)).first()
         if profile and profile.skills:
-            # We fetch user recommendations to map match percentages
-            recs = get_recommendations(profile)
+            recs = get_recommendations(profile, session)
             user_recs_map = {r["internship"].id: r for r in recs}
 
     # Serialization
@@ -105,7 +109,12 @@ def list_internships():
         
         status = "none"
         if user_id:
-            saved_status = SavedInternship.query.filter_by(user_id=user_id, internship_id=inst.id).first()
+            saved_status = session.exec(
+                select(SavedInternship).where(
+                    SavedInternship.user_id == user_id, 
+                    SavedInternship.internship_id == inst.id
+                )
+            ).first()
             if saved_status:
                 status = saved_status.status
 
@@ -134,20 +143,27 @@ def list_internships():
         })
 
     # Sort Results
-    if sort_by == 'stipend':
+    if sort == 'stipend':
         serialized.sort(key=lambda x: x["stipend"], reverse=True)
-    elif sort_by == 'match' and user_recs_map:
+    elif sort == 'match' and user_recs_map:
         serialized.sort(key=lambda x: x["match_score"], reverse=True)
     else:  # 'latest'
         serialized.sort(key=lambda x: x["id"], reverse=True)
 
-    return jsonify(serialized), 200
+    return serialized
 
-@main_bp.route('/api/internships/<int:id>', methods=['GET'])
-def get_internship_detail(id):
-    inst = Internship.query.get_or_404(id)
-    user_id = session.get('user_id')
-    user_role = session.get('role')
+@main_router.get('/api/internships/{internship_id}')
+def get_internship_detail(
+    internship_id: int,
+    request: Request,
+    session: Session = Depends(get_session)
+):
+    inst = session.get(Internship, internship_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Internship not found")
+        
+    user_id = request.session.get('user_id')
+    user_role = request.session.get('role')
     
     match_score = 50
     reasons = ["Please log in as a student to see match explanations."]
@@ -156,9 +172,9 @@ def get_internship_detail(id):
     status = "none"
     
     if user_id and user_role == 'candidate':
-        profile = Profile.query.filter_by(user_id=user_id).first()
+        profile = session.exec(select(Profile).where(Profile.user_id == user_id)).first()
         if profile:
-            recs = get_recommendations(profile)
+            recs = get_recommendations(profile, session)
             match_rec = next((r for r in recs if r["internship"].id == inst.id), None)
             if match_rec:
                 match_score = match_rec["match_score"]
@@ -166,11 +182,16 @@ def get_internship_detail(id):
                 missing_skills = match_rec["missing_skills"]
                 confidence = match_rec["confidence_score"]
                 
-            saved_status = SavedInternship.query.filter_by(user_id=user_id, internship_id=inst.id).first()
+            saved_status = session.exec(
+                select(SavedInternship).where(
+                    SavedInternship.user_id == user_id, 
+                    SavedInternship.internship_id == inst.id
+                )
+            ).first()
             if saved_status:
                 status = saved_status.status
 
-    return jsonify({
+    return {
         "id": inst.id,
         "company_name": inst.company_name,
         "company_logo": inst.company_logo or "https://via.placeholder.com/60",
@@ -192,4 +213,4 @@ def get_internship_detail(id):
         "missing_skills": missing_skills,
         "confidence": confidence,
         "status": status
-    }), 200
+    }

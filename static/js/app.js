@@ -499,8 +499,16 @@ function exportRecommendationsPDF() {
                 </div>
                 <div style="background-color: rgba(99, 102, 241, 0.05); padding: 12px; border-radius: 6px; border-left: 3px solid #6366F1;">
                     <strong>Match Reasoning:</strong>
-                    <ul style="margin: 6px 0 0 0; padding-left: 20px; font-size: 0.85rem;">
-                        ${rec.reasons.map(r => `<li>${r}</li>`).join('')}
+                    <ul style="margin: 6px 0 0 0; padding: 0; font-size: 0.85rem; list-style: none;">
+                        ${rec.reasons.map(r => {
+                            const isGap = r.toLowerCase().includes('gap') || 
+                                          r.toLowerCase().includes('mismatch') || 
+                                          r.toLowerCase().includes('complete your profile') ||
+                                          r.toLowerCase().includes('not meet');
+                            const icon = isGap ? '❌' : '✓';
+                            const color = isGap ? '#EF4444' : '#10B981';
+                            return `<li style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px;"><span style="color: ${color}; font-weight: bold; flex-shrink: 0;">${icon}</span><span>${r}</span></li>`;
+                        }).join('')}
                     </ul>
                 </div>
             </div>
@@ -1065,7 +1073,13 @@ async function viewInternshipDetails(id) {
     if (currentUser && currentUser.role === 'candidate') {
         activeInternship.reasons.forEach(reason => {
             const li = document.createElement('li');
-            li.innerText = reason;
+            const isGap = reason.toLowerCase().includes('gap') || 
+                          reason.toLowerCase().includes('mismatch') || 
+                          reason.toLowerCase().includes('complete your profile') ||
+                          reason.toLowerCase().includes('not meet');
+            const iconClass = isGap ? 'fa-solid fa-circle-xmark' : 'fa-solid fa-circle-check';
+            const iconColor = isGap ? 'var(--danger)' : 'var(--success)';
+            li.innerHTML = `<i class="${iconClass}" style="margin-top: 3px; flex-shrink: 0; color: ${iconColor};"></i><span>${reason}</span>`;
             reasonsEl.appendChild(li);
         });
     } else {

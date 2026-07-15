@@ -999,12 +999,6 @@ body {
     gap: 12px;
 }
 
-.explain-reasons li::before {
-    content: "✓";
-    color: var(--success);
-    font-weight: 800;
-}
-
 /* Admin Insights panels */
 .stats-cards-grid {
     display: grid;

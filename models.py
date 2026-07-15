@@ -1,184 +1,231 @@
 import json
 from datetime import datetime
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
+from typing import Optional, List
+from sqlmodel import SQLModel, Field, Relationship
+from passlib.context import CryptContext
 
-db = SQLAlchemy()
+# CryptContext for password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-class User(db.Model):
+class User(SQLModel, table=True):
     __tablename__ = 'users'
     
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)
-    role = db.Column(db.String(20), default='candidate')  # 'candidate' or 'admin'
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, index=True, nullable=False)
+    password_hash: str = Field(nullable=False)
+    role: str = Field(default='candidate')  # 'candidate' or 'admin'
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
-    profile = db.relationship('Profile', backref='user', uselist=False, cascade="all, delete-orphan")
-    saved_internships = db.relationship('SavedInternship', backref='user', cascade="all, delete-orphan")
-    recommendations = db.relationship('RecommendationHistory', backref='user', cascade="all, delete-orphan")
-    applications = db.relationship('ApplicationHistory', backref='user', cascade="all, delete-orphan")
+    profile: Optional["Profile"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"}
+    )
+    saved_internships: List["SavedInternship"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    recommendations: List["RecommendationHistory"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    applications: List["ApplicationHistory"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
     
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+    def set_password(self, password: str):
+        self.password_hash = pwd_context.hash(password)
         
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
+    def check_password(self, password: str) -> bool:
+        return pwd_context.verify(password, self.password_hash)
 
-class Profile(db.Model):
+class Profile(SQLModel, table=True):
     __tablename__ = 'profiles'
     
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), unique=True, nullable=False)
-    full_name = db.Column(db.String(100), nullable=False)
-    phone = db.Column(db.String(20), nullable=True)
-    college = db.Column(db.String(200), nullable=True)
-    education_level = db.Column(db.String(100), nullable=True)
-    degree = db.Column(db.String(100), nullable=True)
-    branch = db.Column(db.String(100), nullable=True)
-    graduation_year = db.Column(db.Integer, nullable=True)
-    cgpa = db.Column(db.Float, nullable=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key='users.id', unique=True, nullable=False)
+    full_name: str = Field(nullable=False)
+    phone: Optional[str] = Field(default=None, nullable=True)
+    college: Optional[str] = Field(default=None, nullable=True)
+    education_level: Optional[str] = Field(default=None, nullable=True)
+    degree: Optional[str] = Field(default=None, nullable=True)
+    branch: Optional[str] = Field(default=None, nullable=True)
+    graduation_year: Optional[int] = Field(default=None, nullable=True)
+    cgpa: Optional[float] = Field(default=None, nullable=True)
     
-    # Stored as JSON strings
-    _skills = db.Column(db.Text, default='[]')
-    _interests = db.Column(db.Text, default='[]')
+    # Stored as JSON strings (avoiding leading underscores for Pydantic)
+    skills_raw: str = Field(default='[]')
+    interests_raw: str = Field(default='[]')
     
-    preferred_industry = db.Column(db.String(100), nullable=True)
-    preferred_job_role = db.Column(db.String(100), nullable=True)
-    preferred_location = db.Column(db.String(100), nullable=True)
-    resume_filename = db.Column(db.String(200), nullable=True)
+    preferred_industry: Optional[str] = Field(default=None, nullable=True)
+    preferred_job_role: Optional[str] = Field(default=None, nullable=True)
+    preferred_location: Optional[str] = Field(default=None, nullable=True)
+    resume_filename: Optional[str] = Field(default=None, nullable=True)
+    
+    # Relationships
+    user: Optional[User] = Relationship(back_populates="profile")
+    
+    def __init__(self, **data):
+        skills = data.pop("skills", None)
+        interests = data.pop("interests", None)
+        super().__init__(**data)
+        if skills is not None:
+            self.skills = skills
+        if interests is not None:
+            self.interests = interests
     
     @property
-    def skills(self):
+    def skills(self) -> list:
         try:
-            return json.loads(self._skills) if self._skills else []
+            return json.loads(self.skills_raw) if self.skills_raw else []
         except:
             return []
             
     @skills.setter
     def skills(self, value):
-        self._skills = json.dumps(value if isinstance(value, list) else [])
+        self.skills_raw = json.dumps(value if isinstance(value, list) else [])
         
     @property
-    def interests(self):
+    def interests(self) -> list:
         try:
-            return json.loads(self._interests) if self._interests else []
+            return json.loads(self.interests_raw) if self.interests_raw else []
         except:
             return []
             
     @interests.setter
     def interests(self, value):
-        self._interests = json.dumps(value if isinstance(value, list) else [])
+        self.interests_raw = json.dumps(value if isinstance(value, list) else [])
 
-class Internship(db.Model):
+class Internship(SQLModel, table=True):
     __tablename__ = 'internships'
     
-    id = db.Column(db.Integer, primary_key=True)
-    company_name = db.Column(db.String(100), nullable=False)
-    company_logo = db.Column(db.String(500), nullable=True)  # URL or base64 or placeholder
-    title = db.Column(db.String(150), nullable=False)
-    description = db.Column(db.Text, nullable=False)
-    responsibilities = db.Column(db.Text, nullable=True)  # Comma-separated or bullet points
+    id: Optional[int] = Field(default=None, primary_key=True)
+    company_name: str = Field(nullable=False)
+    company_logo: Optional[str] = Field(default=None, nullable=True)
+    title: str = Field(nullable=False)
+    description: str = Field(nullable=False)
+    responsibilities: Optional[str] = Field(default=None, nullable=True)
     
     # Stored as JSON strings
-    _required_skills = db.Column(db.Text, default='[]')
+    required_skills_raw: str = Field(default='[]')
     
-    eligibility_criteria = db.Column(db.Text, nullable=True)
-    degree_requirement = db.Column(db.String(100), nullable=True)
+    eligibility_criteria: Optional[str] = Field(default=None, nullable=True)
+    degree_requirement: Optional[str] = Field(default=None, nullable=True)
     
     # Stored as JSON strings
-    _branch_requirement = db.Column(db.Text, default='[]')
+    branch_requirement_raw: str = Field(default='[]')
     
-    location = db.Column(db.String(100), nullable=False)
-    mode = db.Column(db.String(50), nullable=False)  # 'Remote', 'Hybrid', 'Onsite'
-    duration = db.Column(db.Integer, nullable=False)  # in months
-    stipend = db.Column(db.Integer, nullable=False)  # per month in INR
-    industry = db.Column(db.String(100), nullable=True)
-    category = db.Column(db.String(100), nullable=True)
-    application_deadline = db.Column(db.String(50), nullable=True)  # Date string or DateTime
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    location: str = Field(nullable=False)
+    mode: str = Field(nullable=False)  # 'Remote', 'Hybrid', 'Onsite'
+    duration: int = Field(nullable=False)  # in months
+    stipend: int = Field(nullable=False)  # per month in INR
+    industry: Optional[str] = Field(default=None, nullable=True)
+    category: Optional[str] = Field(default=None, nullable=True)
+    application_deadline: Optional[str] = Field(default=None, nullable=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     
+    def __init__(self, **data):
+        required_skills = data.pop("required_skills", None)
+        branch_requirement = data.pop("branch_requirement", None)
+        super().__init__(**data)
+        if required_skills is not None:
+            self.required_skills = required_skills
+        if branch_requirement is not None:
+            self.branch_requirement = branch_requirement
+            
     @property
-    def required_skills(self):
+    def required_skills(self) -> list:
         try:
-            return json.loads(self._required_skills) if self._required_skills else []
+            return json.loads(self.required_skills_raw) if self.required_skills_raw else []
         except:
             return []
             
     @required_skills.setter
     def required_skills(self, value):
-        self._required_skills = json.dumps(value if isinstance(value, list) else [])
+        self.required_skills_raw = json.dumps(value if isinstance(value, list) else [])
         
     @property
-    def branch_requirement(self):
+    def branch_requirement(self) -> list:
         try:
-            return json.loads(self._branch_requirement) if self._branch_requirement else []
+            return json.loads(self.branch_requirement_raw) if self.branch_requirement_raw else []
         except:
             return []
             
     @branch_requirement.setter
     def branch_requirement(self, value):
-        self._branch_requirement = json.dumps(value if isinstance(value, list) else [])
+        self.branch_requirement_raw = json.dumps(value if isinstance(value, list) else [])
 
-class SavedInternship(db.Model):
+class SavedInternship(SQLModel, table=True):
     __tablename__ = 'saved_internships'
     
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    internship_id = db.Column(db.Integer, db.ForeignKey('internships.id', ondelete='CASCADE'), nullable=False)
-    status = db.Column(db.String(20), default='saved')  # 'saved' or 'applied'
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key='users.id', nullable=False)
+    internship_id: int = Field(foreign_key='internships.id', nullable=False)
+    status: str = Field(default='saved')  # 'saved' or 'applied'
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
-    internship = db.relationship('Internship')
+    user: Optional[User] = Relationship(back_populates="saved_internships")
+    internship: Optional[Internship] = Relationship()
 
-class RecommendationHistory(db.Model):
+class RecommendationHistory(SQLModel, table=True):
     __tablename__ = 'recommendation_histories'
     
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    internship_id = db.Column(db.Integer, db.ForeignKey('internships.id', ondelete='CASCADE'), nullable=False)
-    score = db.Column(db.Float, nullable=False)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key='users.id', nullable=False)
+    internship_id: int = Field(foreign_key='internships.id', nullable=False)
+    score: float = Field(nullable=False)
     
     # Stored details for explainable AI
-    _reasons = db.Column(db.Text, default='[]')
-    _missing_skills = db.Column(db.Text, default='[]')
+    reasons_raw: str = Field(default='[]')
+    missing_skills_raw: str = Field(default='[]')
     
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
-    internship = db.relationship('Internship')
+    user: Optional[User] = Relationship(back_populates="recommendations")
+    internship: Optional[Internship] = Relationship()
     
+    def __init__(self, **data):
+        reasons = data.pop("reasons", None)
+        missing_skills = data.pop("missing_skills", None)
+        super().__init__(**data)
+        if reasons is not None:
+            self.reasons = reasons
+        if missing_skills is not None:
+            self.missing_skills = missing_skills
+            
     @property
-    def reasons(self):
+    def reasons(self) -> list:
         try:
-            return json.loads(self._reasons) if self._reasons else []
+            return json.loads(self.reasons_raw) if self.reasons_raw else []
         except:
             return []
             
     @reasons.setter
     def reasons(self, value):
-        self._reasons = json.dumps(value if isinstance(value, list) else [])
+        self.reasons_raw = json.dumps(value if isinstance(value, list) else [])
         
     @property
-    def missing_skills(self):
+    def missing_skills(self) -> list:
         try:
-            return json.loads(self._missing_skills) if self._missing_skills else []
+            return json.loads(self.missing_skills_raw) if self.missing_skills_raw else []
         except:
             return []
             
     @missing_skills.setter
     def missing_skills(self, value):
-        self._missing_skills = json.dumps(value if isinstance(value, list) else [])
+        self.missing_skills_raw = json.dumps(value if isinstance(value, list) else [])
 
-class ApplicationHistory(db.Model):
+class ApplicationHistory(SQLModel, table=True):
     __tablename__ = 'application_histories'
     
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    internship_id = db.Column(db.Integer, db.ForeignKey('internships.id', ondelete='CASCADE'), nullable=False)
-    applied_at = db.Column(db.DateTime, default=datetime.utcnow)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key='users.id', nullable=False)
+    internship_id: int = Field(foreign_key='internships.id', nullable=False)
+    applied_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
-    internship = db.relationship('Internship')
+    user: Optional[User] = Relationship(back_populates="applications")
+    internship: Optional[Internship] = Relationship()
