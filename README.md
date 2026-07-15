@@ -30,9 +30,9 @@ Below is the visual architecture detailing the resume processing pipeline and re
          │
          ▼
 [ Hybrid Recommendation Engine ]
-  ├── Skills Match (40% Weight)
-  ├── Structured Eligibility (40% Weight)
-  └── Semantic Cosine Similarity (20% Weight)
+  ├── Skills Match (60% Weight)
+  ├── Structured Eligibility (25% Weight)
+  └── Semantic Cosine Similarity (15% Weight)
          │
          ▼
 [ Explanatory Match Analysis ]
@@ -66,7 +66,7 @@ Below is the visual architecture detailing the resume processing pipeline and re
 
 ## Tech Stack
 
-* **Backend**: Python, Flask, Flask-SQLAlchemy (SQLite)
+* **Backend**: Python, FastAPI, SQLModel, Uvicorn (SQLite)
 * **Frontend**: HTML5, Vanilla CSS3, JavaScript (SPA architecture)
 * **AI / ML**: Google Gemini API (`google-genai`), Scikit-Learn (`TfidfVectorizer`), NumPy
 * **PDF Extraction**: `pdfplumber`, `pypdf`, `pymupdf`
@@ -77,12 +77,13 @@ Below is the visual architecture detailing the resume processing pipeline and re
 
 The application uses SQLite for persistent storage, with database initialization and seeding integrated seamlessly:
 
-* **Auto-Seeding**: When the Flask application starts up, it checks if the internship database has been populated. If empty, it automatically seeds:
-  - **1 Admin User**: `admin@pm-internship.gov.in` (password: `admin123`)
-  - **1 Default Candidate User**: `student@pm-internship.gov.in` (password: `student123`), preloaded with a completed profile for student *Aarav Sharma*.
-  - **10 Curated Internship Opportunities** across diverse domains (Software Engineering, Web Development, Cloud Computing, ML, Operations, etc.) corresponding to the PM Scheme.
-* **Manual Reset & Seeding**: You can reset and re-seed the database at any time by running:
+* **Table Initialization**: On application startup, database tables are automatically initialized using SQLModel's metadata handler.
+* **Database Seeding**: You can seed the database with default users and internships at any time by running:
   ```bash
   python seed.py
   ```
+  This script will seed:
+  - **1 Admin User**: `admin@pm-internship.gov.in` (password: `admin123`)
+  - **1 Default Candidate User**: `student@pm-internship.gov.in` (password: `student123`), preloaded with a completed profile for student *Aarav Sharma*.
+  - **10 Curated Internship Opportunities** across diverse domains (Software Engineering, Web Development, Cloud Computing, ML, Operations, etc.) corresponding to the PM Scheme.
   *(Note: Running this command directly is destructive and will drop all tables before seeding a clean database)*
